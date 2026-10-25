@@ -1,0 +1,49 @@
+{
+	"Name": "Display Hotkeys",
+	"Version": "1.0.0.0",
+	"Author": "Lee Cleobury",
+	"Description": "Save monitor layouts (which displays are on, resolution, refresh rate, position, rotation, HDR and scaling) and switch between them from a key or from a keyboard hotkey anywhere in Windows.",
+	"Category": "Display Hotkeys",
+	"CategoryIcon": "imgs/category",
+	"Icon": "imgs/plugin",
+	"CodePath": "bin/DisplayHotkeys.exe",
+	"CodePathWin": "bin/DisplayHotkeys.exe",
+	"PropertyInspectorPath": "ui/settings.html",
+	"SDKVersion": 2,
+	"Software": {
+		"MinimumVersion": "6.4"
+	},
+	"OS": [
+		{
+			"Platform": "windows",
+			"MinimumVersion": "10"
+		}
+	],
+	"UUID": "com.lee-cleobury.displayhotkeys",
+	"Actions": [
+		{
+			"Name": "Switch Display Profile",
+			"UUID": "com.lee-cleobury.displayhotkeys.switch",
+			"Icon": "imgs/action-switch",
+			"Tooltip": "Switch to a saved display layout. Can also be given a keyboard hotkey.",
+			"Controllers": ["Keypad"],
+			"DisableAutomaticStates": true,
+			"SupportedInMultiActions": true,
+			"States": [
+				{ "Image": "imgs/key", "TitleAlignment": "bottom" },
+				{ "Image": "imgs/key-active", "TitleAlignment": "bottom" }
+			]
+		},
+		{
+			"Name": "Cycle Display Profiles",
+			"UUID": "com.lee-cleobury.displayhotkeys.cycle",
+			"Icon": "imgs/action-cycle",
+			"Tooltip": "Step through every saved display layout in turn. Can also be given a keyboard hotkey.",
+			"Controllers": ["Keypad"],
+			"SupportedInMultiActions": true,
+			"States": [
+				{ "Image": "imgs/key-cycle", "TitleAlignment": "bottom" }
+			]
+		}
+	]
+}

@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>Display Hotkeys</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 12px 14px;
+            color: #d8d8d8;
+            background: #2d2d2d;
+            font: 13px "Segoe UI", Tahoma, sans-serif;
+        }
+        .field { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 8px; margin-bottom: 10px; }
+        label { color: #9a9a9a; }
+        .row { display: flex; gap: 6px; }
+        input {
+            flex: 1;
+            min-width: 0;
+            box-sizing: border-box;
+            padding: 5px 7px;
+            color: #e8e8e8;
+            background: #3d3d3d;
+            border: 1px solid #3d3d3d;
+            border-radius: 3px;
+            font: inherit;
+        }
+        input:focus { outline: none; border-color: #6aa7ff; }
+        #hotkey { cursor: pointer; }
+        #hotkey.capturing { border-color: #6aa7ff; color: #6aa7ff; }
+        button {
+            padding: 5px 10px;
+            color: #e8e8e8;
+            background: #4a4a4a;
+            border: 0;
+            border-radius: 3px;
+            font: inherit;
+            cursor: pointer;
+        }
+        button:hover { background: #575757; }
+        button.primary { width: 100%; background: #2f6fd6; }
+        button.primary:hover { background: #3b7ce6; }
+        .indent { margin-left: 98px; }
+        .displays { margin: 0 0 10px 98px; padding: 0; list-style: none; color: #b8b8b8; }
+        .displays li { padding: 2px 0; }
+        .muted { color: #8a8a8a; font-size: 12px; }
+        .status { min-height: 18px; margin-top: 8px; font-size: 12px; }
+        .status.ok { color: #6fcf7c; }
+        .status.error { color: #ff7b72; }
+        .icon-field { align-items: start; }
+        .icons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+        .icons button {
+            display: grid;
+            justify-items: center;
+            gap: 2px;
+            padding: 4px 2px 3px;
+            background: #3d3d3d;
+            border: 2px solid transparent;
+            font-size: 11px;
+            color: #b8b8b8;
+        }
+        .icons button img { width: 40px; height: 40px; border-radius: 4px; }
+        .icons button.selected { border-color: #6aa7ff; color: #e8e8e8; }
+        [hidden] { display: none !important; }
+    </style>
+</head>
+<body>
+    <div id="switch-ui" hidden>
+        <div class="field">
+            <label for="profile">Profile</label>
+            <input id="profile" list="profiles" placeholder="e.g. Desk or TV" autocomplete="off" />
+            <datalist id="profiles"></datalist>
+        </div>
+        <div class="field icon-field">
+            <label>Icon</label>
+            <div id="icons" class="icons"></div>
+        </div>
+        <ul id="displays" class="displays"></ul>
+        <p id="unsaved" class="muted indent" hidden>Set your displays up how you want them in Windows, then save.</p>
+        <div class="field">
+            <span></span>
+            <button id="save" class="primary">Save current layout to this profile</button>
+        </div>
+    </div>
+
+    <div id="cycle-ui" hidden>
+        <p class="muted">Each press switches to the next saved profile:</p>
+        <p id="cycle-list"></p>
+    </div>
+
+    <div class="field">
+        <label for="hotkey">Keyboard hotkey</label>
+        <div class="row">
+            <input id="hotkey" readonly placeholder="Click, then press keys" />
+            <button id="clear">Clear</button>
+        </div>
+    </div>
+    <p class="muted indent">Works anywhere in Windows while the Stream Deck app is running, even when you're away from the deck.</p>
+
+    <div id="status" class="status indent"></div>
+
+    <script>
+        const CYCLE = 'com.lee-cleobury.displayhotkeys.cycle';
+        const $ = id => document.getElementById(id);
+        let socket, context, action, settings = {}, savedHotkey = '';
+
+        // Called by the Stream Deck app when the panel opens.
+        function connectElgatoStreamDeckSocket(port, uuid, registerEvent, info, actionInfo) {
+            context = uuid;
+            const ai = JSON.parse(actionInfo);
+            action = ai.action;
+            settings = ai.payload.settings || {};
+
+            $(action === CYCLE ? 'cycle-ui' : 'switch-ui').hidden = false;
+            $('profile').value = settings.profile || '';
+            buildIconPicker();
+
+            socket = new WebSocket('ws://127.0.0.1:' + port);
+            socket.onopen = () => {
+                socket.send(JSON.stringify({ event: registerEvent, uuid }));
+                toPlugin({ cmd: 'refresh' });
+            };
+            socket.onmessage = e => {
+                const msg = JSON.parse(e.data);
+                if (msg.event === 'sendToPropertyInspector') render(msg.payload);
+            };
+        }
+
+        // Must match the images in imgs/keys (made by make-icons.ps1).
+        const ICONS = [
+            ['monitor', 'Monitor'], ['dual', 'Dual'], ['ultrawide', 'Ultrawide'], ['tv', 'TV'],
+            ['pc', 'PC'], ['laptop', 'Laptop'], ['projector', 'Projector'], ['controller', 'Gaming'],
+        ];
+
+        function buildIconPicker() {
+            const current = settings.icon || 'monitor';
+            for (const [id, label] of ICONS) {
+                const b = document.createElement('button');
+                b.title = label;
+                b.innerHTML = `<img src="../imgs/keys/${id}@2x.png" alt=""><span>${label}</span>`;
+                b.classList.toggle('selected', id === current);
+                b.addEventListener('click', () => {
+                    document.querySelectorAll('.icons button').forEach(x => x.classList.remove('selected'));
+                    b.classList.add('selected');
+                    settings.icon = id;
+                    settings.iconChosen = true;
+                    socket.send(JSON.stringify({ event: 'setSettings', context, payload: settings }));
+                });
+                $('icons').appendChild(b);
+            }
+        }
+
+        function guessIcon(name) {
+            const n = name.toLowerCase();
+            if (/\b(tv|telly|lounge|living|couch|sofa|oled)\b/.test(n)) return 'tv';
+            if (/game|gaming|xbox|playstation|steam|big ?picture/.test(n)) return 'controller';
+            if (/projector|cinema|theat/.test(n)) return 'projector';
+            if (/laptop|notebook/.test(n)) return 'laptop';
+            if (/ultra ?wide|g9|49/.test(n)) return 'ultrawide';
+            if (/dual|both|two|2 ?monitors?|desk/.test(n)) return 'dual';
+            if (/\b(pc|computer|tower)\b/.test(n)) return 'pc';
+            if (/monitor|single|main/.test(n)) return 'monitor';
+            return null;
+        }
+
+        function toPlugin(payload) {
+            socket.send(JSON.stringify({ event: 'sendToPlugin', action, context, payload }));
+        }
+
+        function render(s) {
+            $('profiles').innerHTML = '';
+            for (const name of s.profiles) {
+                const opt = document.createElement('option');
+                opt.value = name;
+                $('profiles').appendChild(opt);
+            }
+            $('displays').innerHTML = '';
+            for (const d of s.displays) {
+                const li = document.createElement('li');
+                li.textContent = d;
+                $('displays').appendChild(li);
+            }
+            if (s.saved) {
+                const li = document.createElement('li');
+                li.className = 'muted';
+                li.textContent = 'Saved ' + s.savedAt;
+                $('displays').appendChild(li);
+            }
+            $('unsaved').hidden = s.saved || !s.profile;
+            $('cycle-list').textContent = s.profiles.length ? s.profiles.join('  →  ') : 'No profiles saved yet.';
+
+            savedHotkey = s.hotkey || '';
+            if (!$('hotkey').classList.contains('capturing')) $('hotkey').value = savedHotkey;
+
+            const status = $('status');
+            status.textContent = s.error || s.message || '';
+            status.className = 'status indent ' + (s.error ? 'error' : 'ok');
+        }
+
+        let typing;
+        $('profile').addEventListener('input', () => {
+            clearTimeout(typing);
+            typing = setTimeout(() => {
+                settings.profile = $('profile').value.trim();
+                // Pick a fitting icon automatically until the user chooses one.
+                if (!settings.iconChosen) {
+                    const guess = guessIcon(settings.profile);
+                    if (guess) {
+                        settings.icon = guess;
+                        document.querySelectorAll('.icons button').forEach((b, i) => b.classList.toggle('selected', ICONS[i][0] === guess));
+                    }
+                }
+                socket.send(JSON.stringify({ event: 'setSettings', context, payload: settings }));
+            }, 300);
+        });
+
+        $('save').addEventListener('click', () => toPlugin({ cmd: 'save' }));
+
+        // Hotkey capture: our own hotkeys are paused while this field has focus so they can be re-recorded.
+        const hk = $('hotkey');
+        hk.addEventListener('focus', () => {
+            hk.classList.add('capturing');
+            hk.value = '';
+            hk.placeholder = 'Press a key combination…';
+            toPlugin({ cmd: 'pauseHotkeys' });
+        });
+        hk.addEventListener('blur', () => {
+            hk.classList.remove('capturing');
+            hk.placeholder = 'Click, then press keys';
+            hk.value = savedHotkey;
+            toPlugin({ cmd: 'resumeHotkeys' });
+        });
+        hk.addEventListener('keydown', e => {
+            e.preventDefault();
+            if (e.key === 'Escape') { hk.blur(); return; }
+            const mods = [];
+            if (e.ctrlKey) mods.push('Ctrl');
+            if (e.altKey) mods.push('Alt');
+            if (e.shiftKey) mods.push('Shift');
+            if (e.metaKey) mods.push('Win');
+            const key = keyName(e.code);
+            if (!key) { hk.value = mods.length ? mods.join('+') + '+…' : ''; return; }
+            if (!mods.length && !/^F\d+$/.test(key)) {
+                $('status').textContent = 'Add Ctrl, Alt, Shift or Win so it doesn\'t clash with normal typing.';
+                $('status').className = 'status indent error';
+                return;
+            }
+            savedHotkey = [...mods, key].join('+');
+            toPlugin({ cmd: 'setHotkey', hotkey: savedHotkey });
+            hk.blur();
+        });
+        $('clear').addEventListener('click', () => {
+            savedHotkey = '';
+            hk.value = '';
+            toPlugin({ cmd: 'setHotkey', hotkey: '' });
+        });
+
+        // Browser key codes → Windows key names understood by the plugin.
+        function keyName(code) {
+            if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+            if (/^Digit\d$/.test(code)) return code.slice(5);
+            if (/^F\d+$/.test(code)) return code;
+            if (/^Numpad\d$/.test(code)) return 'NumPad' + code.slice(6);
+            return {
+                Space: 'Space', Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
+                Insert: 'Insert', Delete: 'Delete', ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+                Minus: 'OemMinus', Equal: 'Oemplus', Comma: 'Oemcomma', Period: 'OemPeriod', Backquote: 'Oemtilde',
+                Pause: 'Pause', ScrollLock: 'Scroll', NumpadAdd: 'Add', NumpadSubtract: 'Subtract',
+                NumpadMultiply: 'Multiply', NumpadDivide: 'Divide', NumpadDecimal: 'Decimal',
+            }[code] || null;
+        }
+    </script>
+</body>
+</html>
