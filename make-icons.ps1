@@ -140,7 +140,7 @@ $glyphs = [ordered]@{
 $white = [System.Drawing.Color]::White
 $blue = [System.Drawing.Color]::FromArgb(106, 167, 255)
 $green = [System.Drawing.Color]::FromArgb(111, 207, 124)
-$bg = [System.Drawing.Color]::FromArgb(30, 30, 34)
+$bg = [System.Drawing.Color]::Black   # pure black so OLED keys stay off behind the glyph
 
 foreach ($name in $glyphs.Keys) {
     $glyph = $glyphs[$name]
