@@ -55,12 +55,24 @@ static class ProfileStore
     static string ConfigFile => Path.Combine(Root, "config.json");
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
+    // Last successful read of each profile file, used if a later read fails (e.g. file briefly locked).
+    static readonly Dictionary<string, DisplayProfile> lastGood = new(StringComparer.OrdinalIgnoreCase);
+
     public static List<DisplayProfile> LoadAll()
     {
         if (!Directory.Exists(ProfileDir)) return new();
-        return Directory.GetFiles(ProfileDir, "*.json")
-            .Select(Read<DisplayProfile>).OfType<DisplayProfile>()
-            .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        var profiles = new List<DisplayProfile>();
+        lock (lastGood)
+        {
+            foreach (var file in Directory.GetFiles(ProfileDir, "*.json"))
+            {
+                var p = Read<DisplayProfile>(file);
+                if (p != null) lastGood[file] = p;
+                else if (!lastGood.TryGetValue(file, out p)) continue;
+                profiles.Add(p);
+            }
+        }
+        return profiles.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     public static DisplayProfile? Load(string name) =>
@@ -92,9 +104,31 @@ static class ProfileStore
         return Path.Combine(ProfileDir, name + ".json");
     }
 
+    /// <summary>The most recent problem reading a profile or config file, for the plugin log.</summary>
+    public static string? LastError { get; private set; }
+
+    /// <summary>Where profiles are stored and what's there, for the plugin log.</summary>
+    public static string Describe()
+    {
+        if (!Directory.Exists(ProfileDir)) return $"{ProfileDir} does not exist";
+        var files = Directory.GetFiles(ProfileDir, "*.json").Select(Path.GetFileName);
+        return $"{ProfileDir}: [{string.Join(", ", files)}]" + (LastError != null ? $" last error: {LastError}" : "");
+    }
+
     static T? Read<T>(string file) where T : class
     {
-        try { return File.Exists(file) ? JsonSerializer.Deserialize<T>(File.ReadAllText(file)) : null; }
-        catch { return null; }
+        for (int attempt = 1; ; attempt++)
+        {
+            try { return File.Exists(file) ? JsonSerializer.Deserialize<T>(File.ReadAllText(file)) : null; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && attempt < 5)
+            {
+                Thread.Sleep(200); // another program (antivirus, sync) may have it open for a moment
+            }
+            catch (Exception ex)
+            {
+                LastError = $"{Path.GetFileName(file)}: {ex.GetType().Name}: {ex.Message}";
+                return null;
+            }
+        }
     }
 }

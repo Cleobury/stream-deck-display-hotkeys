@@ -34,7 +34,9 @@ sealed class StreamDeckPlugin
         await Send(new JsonObject { ["event"] = registerEvent, ["uuid"] = uuid });
 
         hotkeys = HotkeyHost.Start(action => work.Writer.TryWrite(() => OnHotkey(action)));
-        RegisterHotkeys();
+        var failed = RegisterHotkeys();
+        await Log($"Started. Profiles: {ProfileStore.Describe()}. Loaded: [{string.Join(", ", ProfileStore.LoadAll().Select(p => p.Name))}]" +
+            (failed.Count > 0 ? $". Hotkeys taken by another app: {string.Join(", ", failed)}" : ""));
 
         var worker = Task.Run(async () =>
         {
@@ -185,7 +187,7 @@ sealed class StreamDeckPlugin
         var profile = ProfileStore.Load(name);
         if (profile == null)
         {
-            await Log($"No saved profile called '{name}'.");
+            await Log($"No saved profile called '{name}'. {ProfileStore.Describe()}");
             if (context != null) await Send(Event("showAlert", context));
             return;
         }
@@ -207,9 +209,9 @@ sealed class StreamDeckPlugin
 
     List<string> RegisterHotkeys()
     {
-        var names = ProfileStore.LoadAll().Select(p => p.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var wanted = config.Hotkeys.Where(kv => names.Contains(kv.Key))
-            .Select(kv => (kv.Value, "apply:" + kv.Key, $"{kv.Value} ({kv.Key})")).ToList();
+        // Register every configured hotkey even if its profile can't be read right now;
+        // the profile is loaded fresh when the hotkey is pressed.
+        var wanted = config.Hotkeys.Select(kv => (kv.Value, "apply:" + kv.Key, $"{kv.Value} ({kv.Key})")).ToList();
         if (!string.IsNullOrEmpty(config.CycleHotkey))
             wanted.Add((config.CycleHotkey, "cycle", $"{config.CycleHotkey} (cycle)"));
         return hotkeys.Replace(wanted);

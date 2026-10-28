@@ -10,7 +10,8 @@ if ($LASTEXITCODE -ne 0) { throw "Build failed" }
 
 Stop-Process -Name StreamDeck -Force -ErrorAction SilentlyContinue
 Stop-Process -Name DisplayHotkeys -Force -ErrorAction SilentlyContinue
-Start-Sleep 3
+Wait-Process -Name StreamDeck, DisplayHotkeys -Timeout 15 -ErrorAction SilentlyContinue
+Start-Sleep 1
 New-Item -ItemType Directory -Force $dest | Out-Null
 Copy-Item "$plugin\*" $dest -Recurse -Force
 Start-Process "${env:ProgramFiles}\Elgato\StreamDeck\StreamDeck.exe"
